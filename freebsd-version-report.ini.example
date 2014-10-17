@@ -1,0 +1,10 @@
+host = devbox1 user@dev1.domain.com
+host = gateway user@gw.domain.com
+host = privatehost admin@127.0.0.1:2222
+host = otherone user@other.domain.com:23
+
+index = http://www.freebsd.org/ports/INDEX-10.bz2
+audit = http://www.freebsd.org/ports/auditfile.tbz
+newvers = http://svn.freebsd.org/base/releng/XXX/sys/conf/newvers.sh
+
+
