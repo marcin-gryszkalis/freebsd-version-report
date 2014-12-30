@@ -3,14 +3,11 @@ use strict;
 use warnings;
 use Data::Dumper;
 
-my %pkgng;
-$pkgng{xxxhost} = 1;
-
 my $debug = 0;
 
-my $inifile = "config.ini";
+my $inifile = "freebsd-version-report.ini";
 
-my $rev = '0.1';
+my $rev = '0.2';
 
 print STDERR "Version monitor rev $rev\n";
 
@@ -30,35 +27,6 @@ while (<F>)
 }
 close(F);
 
-print STDERR "getting branches...\n";
-my $onv = $cfg{newvers};
-my %branch;
-my %revmax;
-FV: for my $fv (8..10) # freebsd5-9
-{
-    my $rev = 0;
-    while (1)
-    {
-        my $nv = $onv;
-        $nv =~ s/XXX/$fv.$rev/;
-        my $t = `curl -f -s '$nv'`;
-#        print STDERR "
-        next FV if $? > 0;
-        if ($t =~ m/.*BRANCH="RELEASE-(p\d+).*/)
-        {
-            $t = $1;
-        }
-        else
-        {
-            $t = 'X';
-        }
-
-        print "FreeBSD: $fv.$rev-$t\n";
-        $branch{"$fv.$rev"} = $t;
-        $revmax{$fv} = $rev;
-        $rev++;
-    }
-}
 
 print STDERR "getting index ($cfg{index})...\n";
 my $idx;
@@ -106,64 +74,13 @@ while (<F>)
 }
 close(F);
 
-
-
-print STDERR "getting audit ($cfg{audit})...\n";
-my $audit;
-
-$idxname = $cfg{audit};
-$idxname  =~ s{.*/}{};
-
-($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks) = stat($idxname);
-if (time() - $mtime > 60*60*4)
-{
-    unlink $idxname;
-    `wget $cfg{audit}`;
-    `touch $idxname`;
-    my $idxname0 = $idxname;
-    $idxname =~ s/(.*)\.[^\.]+/$1/;
-    unlink $idxname;
-    `tar -xjf $idxname0`;
-}
-else
-{
-    $idxname =~ s/(.*)\.[^\.]+/$1/;
-}
-
-print STDERR "reading audit ($idxname)...\n";
-open(F, $idxname) or die("cannot open file ($idxname): $!");
-while (<F>)
-{
-    chomp;
-    next if /^#/;
-    my @iline = split /\|/;
-    $audit->{$iline[0]}->{url} = $iline[1];
-    $audit->{$iline[0]}->{desc} = $iline[2];
-
-#     $iline[0] =~ m/^(.*)-(.*)/;
-#     #print STDERR "$1::$2\n";
-#     if ($2)
-#     {
-#         my $pname = $1;
-#         my $pver = $2;
-#         $iline[1] =~ s{/usr/ports/}{};
-#         $idx->{$iline[1]}->{name} = $pname;
-#         $idx->{$iline[1]}->{version} = $pver;
-#         print STDERR "INDEX $pname ($iline[1]) = $pver\n" if $debug;
-#     }
-#     else
-#     {
-#         print STDERR "cannot get version($_)\n";
-#     }
-}
-close(F);
-
-
 my @hosts = split/\|/, $cfg{host};
 my @hostnames;
 my $status;
-my $installed;
+#my $installed;
 my $baseversion;
+my %branch;
+my $vulnerable;
 for my $hh (@hosts)
 {
     print STDERR "getting info from host[$hh]...\n";
@@ -172,19 +89,80 @@ for my $hh (@hosts)
     my ($host, $port) = split /:/, $hostt;
     $port = 22 unless $port;
 
-    my $hostver = `ssh -o VisualHostKey=no -p $port $host 'uname -r'`;
+    my $ssh = "ssh -o VisualHostKey=no -p $port $host";
+
+    my $hostver = `$ssh 'freebsd-version'`; # 10.1-RELEASE-p3
     $hostver =~ m/(\d+)\.(\d+)-[^-]+(-(p\d+))?/;
-    $baseversion->{$name}->{version}=$1;
-    $baseversion->{$name}->{revision}=$2;
+    my $fv = $baseversion->{$name}->{version} = $1;
+    my $rev = $baseversion->{$name}->{revision} = $2;
     $baseversion->{$name}->{branch}=($4 || 'X');
 
-    my $use_pkgng = (exists $pkgng{$name} || $baseversion->{$name}->{version} > 9) ? 1 : 0;
-    $baseversion->{$name}->{pkgng} = $use_pkgng;
+    if (not exists $branch{"$fv.$rev"})
+    {
+        print STDERR "checking branches...\n";
+        my $onv = $cfg{newvers};
+        my $nv = $onv;
+        $nv =~ s/XXX/$fv.$rev/;
 
-    my $pkg_info = $use_pkgng ? 'pkg info' : 'pkg_info';
+        my $t = `curl -f -s '$nv'`;
+        # next FV if $? > 0; ### error case
 
-    open (S, "ssh -o VisualHostKey=no -p $port $host '$pkg_info -ao'|") or die("cannot read from host");
+        # BRANCH="RELEASE-p3"
+        if ($t =~ m/.*BRANCH="RELEASE-(p\d+).*/)
+        {
+            $t = $1;
+        }
+        else
+        {
+            $t = 'X';
+        }
 
+        print STDERR "FreeBSD: $fv.$rev-$t\n";
+        $branch{"$fv.$rev"} = $t;
+
+    }
+
+    open (my $pkgaudf, "$ssh 'pkg audit -Fq'|") or die $!;
+    # samba35-3.5.15
+    # subversion-1.8.10_3
+    while (<$pkgaudf>)
+    {
+        chomp;
+        my $v = $_;
+
+        open (my $pkgaudf2, "$ssh 'pkg audit $v'|") or die $!;
+# phpMyAdmin-4.2.11 is vulnerable:
+# phpMyAdmin -- XSS and DoS vulnerabilities
+# CVE: CVE-2014-9219
+# CVE: CVE-2014-9218
+# WWW: http://portaudit.FreeBSD.org/c9c46fbf-7b83-11e4-a96e-6805ca0b3d42.html
+
+# phpMyAdmin-4.2.11 is vulnerable:
+# phpMyAdmin -- XSS and information disclosure vulnerabilities
+# CVE: CVE-2014-8961
+# CVE: CVE-2014-8960
+# CVE: CVE-2014-8959
+# CVE: CVE-2014-8958
+# WWW: http://portaudit.FreeBSD.org/a5d4a82a-7153-11e4-88c7-6805ca0b3d42.html
+        my $desc = '';
+        while (<$pkgaudf2>)
+        {
+            chomp;
+            if (/^\S+\s--\s*(.*)/)
+            {
+                $desc = $1;
+                next;
+            }
+
+            if (/^WWW:\s*(\S+)/)
+            {
+                $vulnerable->{$name}->{$v} .= "<a href='$1' title='$desc'>[X]</a>";    
+            }
+            
+        }
+    }
+
+    open (S, "$ssh 'pkg info -ao'|") or die("cannot read from host");
     while (<S>)
     {
         chomp;
@@ -192,85 +170,18 @@ for my $hh (@hosts)
         my $pname;
         my $pver;
         
-        if ($use_pkgng)
-        {
-            my @l = split/\s+/;
-            $l[0] =~ m/(.*)-(.*)/;
-            $pname = $1;
-            $pver = $2;
-            $status->{$name}->{$l[1]}->{name} = $pname;
-            $status->{$name}->{$l[1]}->{version} = $pver;
-            $installed->{$name}->{$pname} = 1;
-            print STDERR "$name $pname ($l[1]) = $pver\n" if $debug;
-            
-        }
-        else
-        {
-
-            m/Information for (.*)-(.*):/;
-            if ($2)
-            {
-                $pname = $1;
-                $pver = $2;
-            }
-            else
-            {
-                print STDERR "cannot get remote version($_)\n";
-            }
-    
-            $_ = <S>; # br
-            $_ = <S>; # Origin
-            $_ = <S>; chomp;
-            $status->{$name}->{$_}->{name} = $pname;
-            $status->{$name}->{$_}->{version} = $pver;
-            $installed->{$name}->{$pname} = 1;
-            print STDERR "$name $pname ($_) = $pver\n" if $debug;
-            $_ = <S>; #br
-        }
-
+        my @l = split/\s+/;
+        $l[0] =~ m/(.*)-(.*)/;
+        $pname = $1;
+        $pver = $2;
+        $status->{$name}->{$l[1]}->{name} = $pname;
+        $status->{$name}->{$l[1]}->{version} = $pver;
+        #$installed->{$name}->{$pname} = 1;
+        print STDERR "$name $pname ($l[1]) = $pver\n" if $debug;
     }
+
 }
 
-
-my $vulnerable;
-my $vc = 0;
-for my $hh (@hosts)
-{
-    print STDERR "getting vulnerability info from host[$hh]...\n";
-    my ($name, $hostt) = split /\s+/, $hh;
-    my ($host, $port) = split/:/, $hostt;
-    $port = 22 unless $port;
-
-    my $pkg_info = $baseversion->{$name}->{pkgng} ? 'pkg info' : 'pkg_info';
-
-    my $lines;
-    my $lc = 0;
-    my $cc = 0;
-    for (sort { $a cmp $b } keys %{$audit})
-    {
-        my @vv = split /[<>=]/;
-        my $aud = $audit->{$_};
-
-        #print STDERR "vulnerability test $name ($vv[0] against $_)\n";
-        next unless exists $installed->{$name}->{$vv[0]};
-#        print STDERR "vulnerability check prepare: $name ($vv[0] against $_)\n";
-        print STDERR ".";
-        my $l = "\"$_\" ";
-        open (S, "ssh -o VisualHostKey=no -p $port $host '$pkg_info -E $l '|") or die("cannot read from host");
-
-        while (<S>)
-        {
-            chomp;
-            print STDERR "\n";
-            print STDERR "vulnerable ($vc): $name ($_)\n";
-            $vulnerable->{$name}->{$_} .= "<a href='$aud->{url}' title='$aud->{desc}'>[X]</a>";
-            $vc++;
-        }
-        #$cc = ($cc + 1) % 20; # no of checks in one shot
-        #$lc++ if ($cc == 0);
-    }
-    print STDERR "\n";
-}
 
 print STDERR Dumper $vulnerable if $debug;
 
@@ -289,37 +200,37 @@ my $rowx = 0;
 
 
 
-my $tr = "<tr class='header'><td></td>";
+my $tr = "<tr class='header'><td>&nbsp;</td><td>&nbsp;</td>";
 for (@hostnames)
 {
     $tr .= "<td>$_</td>";
 }
+$tr .= "<td>&nbsp;</td>";
 $tablev .= $tr;
 
-$tr = "<tr><td>FreeBSD version</td>";
+$tr = "<tr><td>FreeBSD version</td><td>&nbsp;</td>";
 my $col = 0;
 for (@hostnames)
 {
     my $tdclass = "odd".($col % 2 ? "odd" : "even");
     my $vr = "$baseversion->{$_}->{version}.$baseversion->{$_}->{revision}";
     my $vrb = "$vr-$baseversion->{$_}->{branch}";
-    if ($revmax{$baseversion->{$_}->{version}} ne $baseversion->{$_}->{revision})
+    if ($branch{$vr} ne $baseversion->{$_}->{branch})
     {
         $tr .= "<td class='$tdclass'><span class='vvul'>$vrb</span></td>";
     }
-    elsif ($branch{$vr} ne $baseversion->{$_}->{branch})
-    {
-        $tr .= "<td class='$tdclass'><span class='vold'>$vrb</span></td>";
-    }
+    # elsif ($revmax{$baseversion->{$_}->{version}} ne $baseversion->{$_}->{revision})
+    # {
+    #     $tr .= "<td class='$tdclass'><span class='vold'>$vrb</span></td>";
+    # }
     else
     {
         $tr .= "<td class='$tdclass'><span class='vok'>$vrb</span></td>";
     }
     $col++;
 }
+$tr .= "<td>&nbsp;</td>";
 $tablev .= $tr;
-
-
 
 for my $pkg (sort {$idx->{$a}->{name} cmp $idx->{$b}->{name} } keys %{$idx})
 {
@@ -336,7 +247,7 @@ for my $pkg (sort {$idx->{$a}->{name} cmp $idx->{$b}->{name} } keys %{$idx})
         $tr .= "<td></td>";
 
         $table .= $tr;
-        $tablex .= $tr if ($tablex eq ''); # only once
+        $tablex .= $tr if ($tablex eq ''); # only once in vuln-table
     }
 
     my $work = 0;
@@ -464,9 +375,10 @@ print H "
     <span class='vvul'>Vulnerable: $cntvul</span><br>
 </div>
 
-<table>$tablev</table><br><br><br>
-<table>$tablex</table><br>
-<table>$table</table><br>
+<table>
+$tablev
+$tablex
+</table><br>
 ";
 
 close(H);
