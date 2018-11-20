@@ -2,12 +2,14 @@
 use strict;
 use warnings;
 use Data::Dumper;
+use POSIX qw{strftime};
 
 my $debug = 0;
 
 my $inifile = "freebsd-version-report.ini";
 
 my $rev = '0.2';
+my $godate = POSIX::strftime("%F %T", localtime);
 
 print STDERR "Version monitor rev $rev\n";
 
@@ -122,7 +124,7 @@ for my $hh (@hosts)
 
     }
 
-    open (my $pkgaudf, "$ssh 'pkg audit -Fq'|") or die $!;
+    open (my $pkgaudf, "$ssh 'sudo pkg audit -Fq'|") or die $!;
     # samba35-3.5.15
     # subversion-1.8.10_3
     while (<$pkgaudf>)
@@ -366,7 +368,9 @@ open(HEAD, "header.html");
 while (<HEAD>) { print H $_ }
 close(HEAD);
 print H "
-<span class='toplogo'>FreeBSD Package Version Monitor rev $rev</span><br><br>
+<div class='toplogo'>FreeBSD Package Version Monitor rev $rev</div>
+<div class='title'>generated: $godate</div>
+<br>
 
 <div style='text-align: left'>
     <span class='vok'>Ok: $cntok</span><br>
