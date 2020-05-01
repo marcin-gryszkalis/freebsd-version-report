@@ -83,15 +83,23 @@ my $status;
 my $baseversion;
 my %branch;
 my $vulnerable;
+my $proxy;
 for my $hh (@hosts)
 {
     print STDERR "getting info from host[$hh]...\n";
     my ($name, $hostt) = split /\s+/, $hh;
     push(@hostnames, $name);
+
+    $proxy = '';
+    if ($hostt =~ m/!(\S+)/)
+    {
+    	$proxy = "-o 'ProxyCommand=nc -X5 -x $1 \%h \%p'";
+	$hostt =~ s/!.*//;
+    }
     my ($host, $port) = split /:/, $hostt;
     $port = 22 unless $port;
 
-    my $ssh = "ssh -o VisualHostKey=no -p $port $host";
+    my $ssh = "ssh -o VisualHostKey=no $proxy -p $port $host";
 
     my $hostver = `$ssh 'freebsd-version'`; # 10.1-RELEASE-p3
     $hostver =~ m/(\d+)\.(\d+)-[^-]+(-(p\d+))?/;
