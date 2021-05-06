@@ -4,7 +4,7 @@ use warnings;
 use Data::Dumper;
 use POSIX qw{strftime};
 
-my $debug = 0;
+my $debug = 1;
 
 my $inifile = "freebsd-version-report.ini";
 
@@ -93,8 +93,8 @@ for my $hh (@hosts)
     $proxy = '';
     if ($hostt =~ m/!(\S+)/)
     {
-    	$proxy = "-o 'ProxyCommand=nc -X5 -x $1 \%h \%p'";
-	$hostt =~ s/!.*//;
+        $proxy = "-o 'ProxyCommand=nc -X5 -x $1 \%h \%p'";
+        $hostt =~ s/!.*//;
     }
     my ($host, $port) = split /:/, $hostt;
     $port = 22 unless $port;
@@ -158,17 +158,17 @@ for my $hh (@hosts)
         while (<$pkgaudf2>)
         {
             chomp;
-            if (/^\S+\s--\s*(.*)/)
+            if (/^\s*\S+\s--\s*(.*)/)
             {
                 $desc = $1;
                 next;
             }
 
-            if (/^WWW:\s*(\S+)/)
+            if (/^\s*WWW:\s*(\S+)/)
             {
-                $vulnerable->{$name}->{$v} .= "<a href='$1' title='$desc'>[X]</a>";    
+                $vulnerable->{$name}->{$v} .= "<a href='$1' title='$desc'>[X]</a>";
             }
-            
+
         }
     }
 
@@ -179,7 +179,7 @@ for my $hh (@hosts)
 
         my $pname;
         my $pver;
-        
+
         my @l = split/\s+/;
         $l[0] =~ m/(.*)-(.*)/;
         $pname = $1;
@@ -190,6 +190,7 @@ for my $hh (@hosts)
         print STDERR "$name $pname ($l[1]) = $pver\n" if $debug;
     }
 
+#    print Dumper $status;
 }
 
 
@@ -327,7 +328,7 @@ for my $pkg (sort {$idx->{$a}->{name} cmp $idx->{$b}->{name} } keys %{$idx})
 
             $value = $status->{$_}->{$pkg}->{version};
         }
-        
+
         my $tdclass = ($row % 2 ? "odd" : "even").($col % 2 ? "odd" : "even");
         $tr .= "<td class='$tdclass'><span class='$tdc'>$value</span>";
         $tr .= $vul if defined $vul;
