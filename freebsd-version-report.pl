@@ -6,7 +6,7 @@ use POSIX qw{strftime};
 
 my $debug = 1;
 
-my $inifile = "freebsd-version-report.ini";
+my $inifile = $ARGV[0] // "freebsd-version-report.ini";
 
 my $rev = '0.2';
 my $godate = POSIX::strftime("%F %T", localtime);
